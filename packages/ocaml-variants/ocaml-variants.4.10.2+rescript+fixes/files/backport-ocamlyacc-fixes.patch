@@ -1,0 +1,135 @@
+From 10e28331a1743fabf2cc66a3134067224ed52cb5 Mon Sep 17 00:00:00 2001
+From: ZhangHongbo <bob.hongbo.zhang@foxmail.com>
+Date: Thu, 8 Jul 2021 16:50:24 +0800
+Subject: [PATCH] backport ocamlyacc fixes
+
+---
+ yacc/defs.h   |  8 +++++++-
+ yacc/error.c  |  4 ++--
+ yacc/reader.c | 39 ++++++++++++++++++++++++++++++---------
+ 3 files changed, 39 insertions(+), 12 deletions(-)
+
+diff --git a/yacc/defs.h b/yacc/defs.h
+index 91aadc3e6..1fd3dc680 100644
+--- a/yacc/defs.h
++++ b/yacc/defs.h
+@@ -145,10 +145,16 @@ struct bucket
+     short prec;
+     char class;
+     char assoc;
+-    char entry;
++    unsigned char entry;  /* 1..MAX_ENTRY_POINT (0 for unassigned) */
+     char true_token;
+ };
+ 
++/* MAX_ENTRY_POINT is the maximal number of entry points into the grammar. */
++/* Entry points are identified by a non-zero byte in the input stream,     */
++/* so there are at most 255 entry points.                                  */
++
++#define MAX_ENTRY_POINT MAXCHAR
++
+ /* TABLE_SIZE is the number of entries in the symbol table.      */
+ /* TABLE_SIZE must be a power of two.                            */
+ 
+diff --git a/yacc/error.c b/yacc/error.c
+index b2750c971..a47bed9fa 100644
+--- a/yacc/error.c
++++ b/yacc/error.c
+@@ -177,8 +177,8 @@ token\n", virtual_input_file_name, lineno, s);
+ 
+ void too_many_entries(void)
+ {
+-    fprintf(stderr, "File \"%s\", line %d: more than 256 entry points\n",
+-            virtual_input_file_name, lineno);
++    fprintf(stderr, "File \"%s\", line %d: more than %u entry points\n",
++            virtual_input_file_name, lineno, MAX_ENTRY_POINT);
+     done(1);
+ }
+ 
+diff --git a/yacc/reader.c b/yacc/reader.c
+index 1b0a5f6b8..737796799 100644
+--- a/yacc/reader.c
++++ b/yacc/reader.c
+@@ -261,9 +261,30 @@ void process_apostrophe_body(FILE *f)
+ 
+ 
+ static void process_open_curly_bracket(FILE *f) {
+-    if (In_bitmap(caml_ident_start, *cptr) || *cptr == '|')
++    char *idcptr = cptr;
++
++    if (*idcptr == '%') {
++        if (*++idcptr == '%') idcptr++;
++
++        if (In_bitmap(caml_ident_start, *idcptr)) {
++            idcptr++;
++            while (In_bitmap(caml_ident_body, *idcptr)) idcptr++;
++            while (*idcptr == '.') {
++                idcptr++;
++                if (In_bitmap(caml_ident_start, *idcptr)) {
++                    idcptr++;
++                    while (In_bitmap(caml_ident_body, *idcptr)) idcptr++;
++                }
++            }
++            while (*idcptr == ' ' || *idcptr == 9 || *idcptr == 12) idcptr++;
++        } else {
++           return;
++        }
++    }
++
++    if (In_bitmap(caml_ident_start, *idcptr) || *idcptr == '|')
+     {
+-        char *newcptr = cptr;
++        char *newcptr = idcptr;
+         size_t size = 0;
+         char *buf;
+         while(In_bitmap(caml_ident_body, *newcptr)) { newcptr++; }
+@@ -273,13 +294,13 @@ static void process_open_curly_bracket(FILE *f) {
+             char *s_line;
+             char *s_cptr;
+ 
+-            size = newcptr - cptr;
++            size = newcptr - idcptr;
+             buf = MALLOC(size + 2);
+             if (!buf) no_space();
+-            memcpy(buf, cptr, size);
++            memcpy(buf, idcptr, size);
+             buf[size] = '}';
+             buf[size + 1] = '\0';
+-            fwrite(cptr, 1, size + 1, f);
++            fwrite(cptr, 1, newcptr - cptr + 1, f);
+             cptr = newcptr + 1;
+             s_lineno = lineno;
+             s_line = dup_line();
+@@ -369,7 +390,7 @@ static void process_comment(FILE *const f) {
+                 continue;
+             default:
+                 if (In_bitmap(caml_ident_start, c)) {
+-                  while (In_bitmap(caml_ident_body, *cptr)) cptr++;
++                  while (In_bitmap(caml_ident_body, *cptr)) putc(*cptr++, f);
+                 }
+                 continue;
+             }
+@@ -978,9 +999,9 @@ void declare_start(void)
+ 
+       if (bp->class == TERM)
+         terminal_start(bp->name);
+-      bp->entry = ++entry_counter;
+-      if (entry_counter == 256)
++      if (entry_counter >= MAX_ENTRY_POINT)
+         too_many_entries();
++      bp->entry = ++entry_counter;
+     }
+ }
+ 
+@@ -1699,7 +1720,7 @@ void make_goal(void)
+       if (is_polymorphic(bp->tag))
+         polymorphic_entry_point(bp->name);
+       fprintf(entry_file,
+-              "let %s (lexfun : Lexing.lexbuf -> token) (lexbuf : Lexing.lexbuf) =\n   (Parsing.yyparse yytables %d lexfun lexbuf : %s)\n",
++              "let %s (lexfun : Lexing.lexbuf -> token) (lexbuf : Lexing.lexbuf) =\n   (Parsing.yyparse yytables %u lexfun lexbuf : %s)\n",
+               bp->name, bp->entry, bp->tag);
+       fprintf(interface_file,
+               "val %s :\n  (Lexing.lexbuf  -> token) -> Lexing.lexbuf -> %s\n",
+-- 
+2.30.1 (Apple Git-130)
+
