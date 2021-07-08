@@ -1,0 +1,71 @@
+From 4bdf6498ace9494ab865dae690869c7ffc6ede08 Mon Sep 17 00:00:00 2001
+From: Hongbo Zhang <bob.hongbo.zhang@foxmail.com>
+Date: Wed, 7 Jul 2021 16:12:13 +0800
+Subject: [PATCH] alert polymorphic
+
+---
+ lambda/translprim.ml | 8 ++++----
+ stdlib/stdlib.mli    | 2 ++
+ 2 files changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/lambda/translprim.ml b/lambda/translprim.ml
+index d56002b70..42ee0a968 100644
+--- a/lambda/translprim.ml
++++ b/lambda/translprim.ml
+@@ -403,8 +403,7 @@ let glb_array_type t1 t2 =
+   | Pfloatarray, Pfloatarray -> Pfloatarray
+ 
+ (* Specialize a primitive from available type information. *)
+-
+-let specialize_primitive env ty ~has_constant_constructor prim =
++let specialize_primitive env ty ~has_constant_constructor prim ~loc =
+   let param_tys =
+     match is_function_type env ty with
+     | None -> []
+@@ -485,6 +484,7 @@ let specialize_primitive env ty ~has_constant_constructor prim =
+     end else if is_base_type env p1 Predef.path_int64 then begin
+       Some (Comparison(comp, Compare_int64s))
+     end else begin
++        Location.alert ~kind:"polymorphic" loc "unsafe comparison";
+       None
+     end
+   | _ -> None
+@@ -726,7 +726,7 @@ let transl_primitive loc p env ty path =
+   let prim = lookup_primitive_and_mark_used loc p env path in
+   let has_constant_constructor = false in
+   let prim =
+-    match specialize_primitive env ty ~has_constant_constructor prim with
++    match specialize_primitive ~loc env ty ~has_constant_constructor prim with
+     | None -> prim
+     | Some prim -> prim
+   in
+@@ -775,7 +775,7 @@ let transl_primitive_application loc p env ty path exp args arg_exps =
+     | _ -> false
+   in
+   let prim =
+-    match specialize_primitive env ty ~has_constant_constructor prim with
++    match specialize_primitive ~loc env ty ~has_constant_constructor prim with
+     | None -> prim
+     | Some prim -> prim
+   in
+diff --git a/stdlib/stdlib.mli b/stdlib/stdlib.mli
+index 7087901a8..1d0798362 100644
+--- a/stdlib/stdlib.mli
++++ b/stdlib/stdlib.mli
+@@ -176,11 +176,13 @@ external compare : 'a -> 'a -> int = "%compare"
+    the {!List.sort} and {!Array.sort} functions. *)
+ 
+ val min : 'a -> 'a -> 'a
++[@@ocaml.alert polymorphic "unsafe comparison"]
+ (** Return the smaller of the two arguments.
+     The result is unspecified if one of the arguments contains
+     the float value [nan]. *)
+ 
+ val max : 'a -> 'a -> 'a
++[@@ocaml.alert polymorphic "unasfe comparison"]
+ (** Return the greater of the two arguments.
+     The result is unspecified if one of the arguments contains
+     the float value [nan]. *)
+-- 
+2.27.0
+
